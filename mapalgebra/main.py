@@ -6,12 +6,10 @@ import os.path
 import sys
 import warnings
 
-import fiona
 import numpy as np
 import pymannkendall as mk
 import rasterio
 from loguru import logger
-from shapely.geometry import Point, shape
 from tqdm import tqdm
 
 from compute import compute
@@ -50,10 +48,6 @@ def get_bands_of_month(m, band_count, begin_year, end_year) -> list:
 
 
 def main(infile, begin_year,  end_year, month=None, agg=None, test='original_test', num_workers=4):
-    fi = fiona.open('/Volumes/Samsung/onedrive/deskmini/mk/src/qz.geojson')
-    first_feature = next(iter(fi))
-    zone = shape(first_feature['geometry'])[0]
-
     outfile = os.path.basename(infile).replace('.tif', '_singleMonth_M{}_{}_{}_Y{}_Y{}.tif'.format(month or '', agg or '', test, begin_year, end_year))
     # print(outfile)
     with rasterio.Env():
@@ -62,8 +56,7 @@ def main(infile, begin_year,  end_year, month=None, agg=None, test='original_tes
             profile.update(blockxsize=32, blockysize=32,
                            tiled=True, count=BANDS, dtype=rasterio.uint8, nodata=0)
 
-            pbar = tqdm(total=multiply(src),
-                        desc='{:.50}'.format(test))
+            pbar = tqdm(total=multiply(src), desc='{:.50}'.format(test))
             # print('compute', compute)
             # random = np.arange(24).reshape(2,3,4)
             # print(compute(random))
@@ -86,17 +79,7 @@ def main(infile, begin_year,  end_year, month=None, agg=None, test='original_tes
                     for window, result in zip(windows, executor.map(compute, data_gen, test_gen, agg_gen)):
                         pbar.update(multiply(window))
                         pbar.write('window {}'.format(window))
-                        for idx in np.ndindex(result.shape):
-                            _, row, col = idx
-                            pt = Point(src.xy(row + window.row_off, col + window.col_off))
-                            if zone.contains(pt):
-                                logger.debug('contains point {}', pt)
-                            else:
-                                logger.debug('not point {}', pt)
-                                result[idx] = 0
-                            # pixel[np.isnan(pixel)] = 0
-                        dst.write(result.astype(
-                            rasterio.uint8), window=window)
+                        dst.write(result.astype(rasterio.uint8), window=window)
                 dst.write_colormap(1, {
                     6: (56, 168, 0, 255),
                     5: (121, 201, 0, 255),

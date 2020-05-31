@@ -2,11 +2,9 @@ import operator as op
 import os
 import sys
 
-import fiona
 import numpy as np
 import pymannkendall as mk
 from loguru import logger
-from shapely.geometry import Point, shape
 
 BANDS = 1
 
@@ -77,28 +75,6 @@ def getCompute(test, pbar, slice_fn):
     return compute
 
 
-selector = [
-    #   1     2     3     4     5     6     7     8     9     10    11    12
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2000
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2001
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2002
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2003
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2004
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2005
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2006
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2007
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2008
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2009
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2010
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2011
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2012
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2013
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2014
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2015
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2016
-]
-
-
 def compute(data, test, agg=None):
     shape = data.shape
     result = np.zeros([BANDS, *shape[1:]])
@@ -112,17 +88,7 @@ def compute(data, test, agg=None):
         # logger.debug('{}{}', idx, pixel)
         try:
             trend = op.attrgetter(test)(mk)(pixel)
-            # trend1 = op.attrgetter(test)(mk)(pixel[120:240])
-            # trend2 = op.attrgetter(test)(mk)(pixel[240:360])
-            # trend3 = op.attrgetter(test)(mk)(pixel[360:480])
-            # logger.log(idx, pixel)
             result[(0, *idx)] = con(trend.slope, trend.p)
-            # result[(1, *idx)] = con(trend1.slope, trend1.p)
-            # result[(2, *idx)] = con(trend2.slope, trend2.p)
-            # result[(3, *idx)] = con(trend3.slope, trend3.p)
-            # result[(1, *idx)] = numberic(trend.trend)
-            # result[(0, *idx)] = pixel[0]
-            # result[(1, *idx)] = pixel[1]
         # except RuntimeWarning as e:
         #     print(e)
         #     tqdm.write('idx =', idx, 'test =', test)
