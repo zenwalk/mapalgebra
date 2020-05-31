@@ -1,184 +1,136 @@
-import pymannkendall as mk
-import numpy as np
-import rasterio
 import concurrent.futures
-import multiprocessing
-import rasterio
-from tqdm import tqdm
-import operator as op
 import itertools
-import warnings
+import multiprocessing
+import operator as op
 import os.path
-from loguru import logger
 import sys
+import warnings
+
+import fiona
+import numpy as np
+import pymannkendall as mk
+import rasterio
+from loguru import logger
+from shapely.geometry import Point, shape
+from tqdm import tqdm
+
+from compute import compute
 
 logger.remove()
 logger.add('main.log', format="{message}")
 
 num_cores = multiprocessing.cpu_count()
 
-BANDS = 2
+BANDS = 1
 
 np.seterr(all='warn')
 warnings.filterwarnings('error')
-
-# def compute2(data):
-#     shape = data.shape
-#     result = np.zeros(shape[1:])
-#     with np.nditer(result, flags=['multi_index'], op_flags=['writeonly']) as it:
-#         for x in it:
-#             # print(it.multi_index)
-#             vec = data[(slice(None), *it.multi_index)]
-#             trend = mk.original_test(vec)
-#             x[...] = con(trend.slope, trend.p)
-#     return result
-
-
-def getCompute(test, pbar):
-    print('test:', test)
-
-    def compute(data):
-        shape = data.shape
-        # pbar and pbar.update(shape[1] * shape[2])
-        print('shape', shape)
-        result = np.zeros([BANDS, *shape[1:]])
-        for idx in np.ndindex(shape[1:]):
-            vec = data[(slice(None), *idx)]
-            try:
-                trend = op.attrgetter(test)(mk)(vec)
-                pbar.update(1)
-                result[(0, *idx)] = con(trend.slope, trend.p)
-                result[(1, *idx)] = numberic(trend.trend)
-                result[(2, *idx)] = trend.p
-                result[(3, *idx)] = trend.h
-            except RuntimeWarning as e:
-                # print('idx =', idx, 'test =', test, sep=' ')
-                result[(0, *idx)] = 0
-                result[(1, *idx)] = 0
-                result[(2, *idx)] = 0
-                result[(3, *idx)] = 0
-        return result
-    return compute
-
-
-selector = [
-    #   1     2     3     4     5     6     7     8     9     10    11    12
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2000
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2001
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2002
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2003
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2004
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2005
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2006
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2007
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2008
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2009
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2010
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2011
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2012
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2013
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2014
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2015
-    False, False, False, False, True, True, True, True, True, False, False, False,  # 2016
-]
-
-
-def compute(data, test):
-    shape = data.shape
-    result = np.zeros([BANDS, *shape[1:]])
-    for idx in np.ndindex(shape[1:]):
-        pixel = data[(slice(None), *idx)]
-        # pixel[np.isnan(pixel)] = 0
-        pixel = np.nan_to_num(pixel)
-        # logger.debug("{}{}", idx, pixel)
-        # pixel = pixel[selector]
-        # pixel = pixel.reshape(-1, 12)
-        # pixel = np.array([sum(row[4:9]) for row in pixel]) 
-        try:
-            trend = op.attrgetter(test)(mk)(pixel)
-            # logger.log(idx, pixel)
-            result[(0, *idx)] = con(trend.slope, trend.p)
-            result[(1, *idx)] = numberic(trend.trend)
-            # result[(0, *idx)] = pixel[0]
-            # result[(1, *idx)] = pixel[1]
-        # except RuntimeWarning as e:
-        #     print(e)
-        #     tqdm.write('idx =', idx, 'test =', test)
-        #     result[(0, *idx)] = 0
-        #     result[(1, *idx)] = 0
-        #     sys.exit()
-        except Exception as e:
-            logger.error("{}{}{}", e, idx, pixel)
-    return result
-
-
-def numberic(trend: str) -> int:
-    if trend == 'no trend':
-        return 1
-    elif trend == 'increasing':
-        return 2
-    elif trend == 'decreasing':
-        return 3
-
-
-def con(slope, p) -> int:
-    if p <= 0.01 and slope <= 0:
-        return 1
-    elif 0.01 < p and p <= 0.05 and slope <= 0:
-        return 2
-    elif 0.05 < p and slope <= 0:
-        return 3
-    elif p <= 0.01 and slope > 0:
-        return 6
-    elif 0.01 < p and p <= 0.05 and slope > 0:
-        return 5
-    elif 0.05 < p and slope > 0:
-        return 4
-    else:
-        return 0
 
 
 def multiply(obj):
     return obj.width * obj.height
 
-wh = lambda obj: obj.width * obj.height
 
-def main(infile, test='original_test', num_workers=4):
-    outfile = os.path.basename(infile).replace('.tif', '_{}.tif'.format(test))
+def wh(obj): return obj.width * obj.height
+
+
+def get_bands_of_month(m, band_count, begin_year, end_year) -> list:
+    assert(m == None or 1 <= m and m <= 12)
+    if m == None:
+        if begin_year == None and end_year == None:
+            return None
+        else:
+            return list(range((begin_year-1981)*12+1, (end_year-1981+1)*12+1))
+    else:
+        band_list = list(range(m, band_count+1, 12))
+        if begin_year == None and end_year == None:
+            return band_list
+        else:
+            return list(map(lambda x: x[1], list(filter(lambda x: begin_year <= x[0] <= end_year, zip(range(1981, 2016 + 1), band_list)))))
+
+
+def main(infile, begin_year,  end_year, month=None, agg=None, test='original_test', num_workers=4):
+    fi = fiona.open('/Volumes/Samsung/onedrive/deskmini/mk/src/qz.geojson')
+    first_feature = next(iter(fi))
+    zone = shape(first_feature['geometry'])[0]
+
+    outfile = os.path.basename(infile).replace('.tif', '_singleMonth_M{}_{}_{}_Y{}_Y{}.tif'.format(month or '', agg or '', test, begin_year, end_year))
+    # print(outfile)
     with rasterio.Env():
         with rasterio.open(infile) as src:
             profile = src.profile
             profile.update(blockxsize=32, blockysize=32,
-                           tiled=True, count=BANDS, dtype=rasterio.float64, nodata=0)
+                           tiled=True, count=BANDS, dtype=rasterio.uint8, nodata=0)
 
-            pbar = tqdm(total=multiply(src), desc='{:.13}'.format(test))
-            # compute = getCompute(test, pbar)
+            pbar = tqdm(total=multiply(src),
+                        desc='{:.50}'.format(test))
             # print('compute', compute)
             # random = np.arange(24).reshape(2,3,4)
             # print(compute(random))
+
+            selected_bands = get_bands_of_month(
+                month, src.count, begin_year, end_year)
+
+            # print(selected_bands)
+
             with rasterio.open(outfile, 'w', **profile) as dst:
                 windows = [window for ij, window in dst.block_windows()]
-                data_gen = (src.read(window=window) for window in windows)
+                data_gen = (src.read(window=window, indexes=selected_bands) for window in windows)
                 test_gen = itertools.repeat(test)
+                agg_gen = itertools.repeat(agg)
                 # for window, data in zip(windows, data_gen):
                 #     result = compute(data)
                 #     dst.write(result.astype(rasterio.float64), window=window)
                 # selector_gen = itertools.repeat(selector)
                 with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-                    for window, result in zip(windows, executor.map(compute, data_gen, test_gen)):
+                    for window, result in zip(windows, executor.map(compute, data_gen, test_gen, agg_gen)):
                         pbar.update(multiply(window))
-                        # print('window', window)
-                        dst.write(result.astype(rasterio.float64), window=window)
+                        pbar.write('window {}'.format(window))
+                        for idx in np.ndindex(result.shape):
+                            _, row, col = idx
+                            pt = Point(src.xy(row + window.row_off, col + window.col_off))
+                            if zone.contains(pt):
+                                logger.debug('contains point {}', pt)
+                            else:
+                                logger.debug('not point {}', pt)
+                                result[idx] = 0
+                            # pixel[np.isnan(pixel)] = 0
+                        dst.write(result.astype(
+                            rasterio.uint8), window=window)
+                dst.write_colormap(1, {
+                    6: (56, 168, 0, 255),
+                    5: (121, 201, 0, 255),
+                    4: (206, 237, 0, 255),
+                    3: (255, 204, 0, 255),
+                    2: (255, 102, 0, 255),
+                    1: (255, 0, 0, 255),
+                    0: (255, 255, 255, 255)
+                })
 
 
 if __name__ == "__main__":
     tests = [
         'yue_wang_modification_test',
+        'original_test'
     ]
-    for test in tests:
-        main('/Volumes/Samsung/Google Drive/NDVIMAX IMAGES/GIMMS_MAXNDVI_01_10.tif', test=test)
-        main('/Volumes/Samsung/Google Drive/NDVIMAX IMAGES/GIMMS_MAXNDVI_81_90.tif', test=test)
-        main('/Volumes/Samsung/Google Drive/NDVIMAX IMAGES/GIMMS_MAXNDVI_91_00.tif', test=test)
-        main('/Volumes/Samsung/Google Drive/NDVIMAX IMAGES/MODIS_MAXNDVI_01_10.tif', test=test)
-        main('/Volumes/Samsung/Google Drive/NDVIMAX IMAGES/MODIS_MAXNDVI_11_16.tif', test=test)
-        
+
+    file_list = [
+        '/Volumes/Samsung/onedrive/deskmini/mk/weather1981_2016/src/v12001.tif',
+        '/Volumes/Samsung/onedrive/deskmini/mk/weather1981_2016/src/v13011.tif'
+    ]
+
+    year_range_list = [
+        [1981, 2016],
+        [1981, 1990],
+        [1991, 2000],
+        [2001, 2010],
+        [2011, 2016]
+    ]
+
+    for fn in file_list:
+        for test in tests:
+            for year_range in year_range_list:
+                main(infile=fn, agg=[4, 9], begin_year=year_range[0], end_year=year_range[1], test=test, num_workers=num_cores)
+                for month in range(1, 13):
+                    main(infile=fn, month=month,
+                         begin_year=year_range[0], end_year=year_range[1], test=test, num_workers=num_cores)
