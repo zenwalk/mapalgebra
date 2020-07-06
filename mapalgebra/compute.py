@@ -6,7 +6,7 @@ import numpy as np
 import pymannkendall as mk
 from loguru import logger
 
-BANDS = 1
+BANDS = 36
 
 
 def numberic(trend: str) -> int:
@@ -58,26 +58,13 @@ def getCompute(test, pbar, slice_fn):
             vec = data[(slice(None), *idx)]
             vec = vec[slice_fn]
             logger.debug(vec)
-            # try:
-            #     trend = op.attrgetter(test)(mk)(vec)
-            #     pbar.update(1)
-            #     result[(0, *idx)] = con(trend.slope, trend.p)
-            #     result[(1, *idx)] = numberic(trend.trend)
-            #     result[(2, *idx)] = trend.p
-            #     result[(3, *idx)] = trend.h
-            # except RuntimeWarning as e:
-            #     # print('idx =', idx, 'test =', test, sep=' ')
-            #     result[(0, *idx)] = 0
-            #     result[(1, *idx)] = 0
-            #     result[(2, *idx)] = 0
-            #     result[(3, *idx)] = 0
         return result
     return compute
 
 
 def compute(data, test, agg=None):
     shape = data.shape
-    result = np.zeros([BANDS, *shape[1:]])
+    result = None
     for idx in np.ndindex(shape[1:]):
         pixel = data[(slice(None), *idx)]
         # pixel[np.isnan(pixel)] = 0
@@ -85,10 +72,20 @@ def compute(data, test, agg=None):
         if agg:
             pixel = pixel.reshape(-1, 12)
             pixel = np.array([sum(row[agg[0]:agg[1]]) for row in pixel])
+
         # logger.debug('{}{}', idx, pixel)
         try:
-            trend = op.attrgetter(test)(mk)(pixel)
-            result[(0, *idx)] = con(trend.slope, trend.p)
+            # func = op.attrgetter(test)(mk)
+            # # print(func)
+            # # sys.exit()
+            # # func = mk.seasonal_test
+            # trend = func(pixel)
+
+            if result is None:
+                result = np.zeros([pixel.shape[0], *shape[1:]])
+
+            for i in range(pixel.shape[0]):
+                result[(i, *idx)] = pixel[i]  # con(trend.slope, trend.p)
         # except RuntimeWarning as e:
         #     print(e)
         #     tqdm.write('idx =', idx, 'test =', test)
